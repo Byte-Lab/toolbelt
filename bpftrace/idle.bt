@@ -1,0 +1,36 @@
+#!/usr/bin/env bpftrace
+/*
+ * idle.bt	Track idle CPU states and durations as histograms.
+ *		For Linux, uses bpftrace, eBPF.
+ *
+ * Copyright 2024 Meta, Inc.
+ * Licensed under the GPL-V2
+ *
+ * 09-May-2024	David Vernet
+ */
+
+BEGIN
+{
+	printf("Measuring average CPU idle lengths and states...\n");
+}
+
+interval:s:10 {
+	exit();
+}
+
+tracepoint:power:cpu_idle
+{
+	if (args.state == (uint32)-1) {
+		@idle_calls = count();
+		$delta = nsecs - @starts[args.cpu_id];
+		@idle_len = hist($delta);
+	} else {
+		@states = lhist(args.state, 0, 5, 1);
+		@starts[args.cpu_id] = nsecs;
+	}
+}
+
+END
+{
+	clear(@starts);
+}

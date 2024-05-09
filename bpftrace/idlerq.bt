@@ -1,0 +1,57 @@
+#!/usr/bin/env bpftrace
+/*
+ * idlerq.bt	Track rq delay for tasks waking up to idle cores
+ *		For Linux, uses bpftrace, eBPF.
+ *
+ * Copyright 2024 Meta, Inc.
+ * Licensed under the GPL-V2
+ *
+ * 09-May-2024	David Vernet
+ */
+
+BEGIN
+{
+	printf("Measuring wakeup -> idle CPU rq delay...\n");
+}
+
+interval:s:10 {
+	exit();
+}
+
+tracepoint:power:cpu_idle
+{
+	if (args.state == (uint32)-1) {
+		@idle_cpus[args.cpu_id] = 0;
+	} else {
+		@idle_cpus[args.cpu_id] = 1;
+	}
+}
+
+tracepoint:sched:sched_wakeup
+{
+	$pid = args.pid;
+	$target_cpu = args.target_cpu;
+	if (@idle_cpus[$target_cpu] == 1) {
+		@idle_wakeups = count();
+		@wakers[$pid] = nsecs;
+	}
+}
+
+tracepoint:sched:sched_switch
+{
+	@total_switches = count();
+	$pid = args.next_pid;
+	$start = @wakers[$pid];
+	if ($start != (uint64)-1) {
+		@idle_switches = count();
+		@wakers[$pid] = -1;
+		$delay = nsecs - $start;
+		@delays = hist($delay);
+	}
+}
+
+END
+{
+	clear(@idle_cpus);
+	clear(@wakers);
+}
